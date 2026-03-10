@@ -27,6 +27,32 @@ export CLICKHOUSE_PASSWORD=
 
 Or use flags: `chops --host myserver --user admin health summary`
 
+### Config File
+
+Create `chops.toml` (or `.chops.toml`) in your project directory, or `~/.config/chops/config.toml` for global settings:
+
+```toml
+host = "localhost"
+user = "default"
+
+[profiles.prod]
+host = "prod-cluster.example.com"
+user = "admin"
+password = "secret"
+database = "analytics"
+
+[profiles.staging]
+host = "staging.example.com"
+user = "readonly"
+```
+
+Use profiles with `--profile` or the `CHOPS_PROFILE` env var:
+
+```bash
+chops --profile prod health summary
+CHOPS_PROFILE=staging chops dq profile events
+```
+
 ## Commands
 
 ### Health & Observability
@@ -49,6 +75,12 @@ Or use flags: `chops --host myserver --user admin health summary`
 | `chops dq drift <table>` | Detect schema and data quality drift vs last snapshot |
 | `chops dq check <table>` | Run quality checks with configurable thresholds (CI-friendly exit codes) |
 | `chops dq freshness <table>` | Time since last row — OK/WARNING/CRITICAL with exit codes |
+
+### Ad-hoc Query
+
+| Command | Description |
+|---------|-------------|
+| `chops query <sql>` | Run any SQL query with table, JSON, or CSV output |
 
 ### Schema Migrations
 
@@ -80,6 +112,11 @@ chops dq check mydb.events --max-null-pct 5 --min-rows 1000
 
 # Check if a streaming table is still receiving data
 chops dq freshness mydb.events --warn 60 --critical 1440
+
+# Ad-hoc query with different output formats
+chops query "SELECT database, count() FROM system.tables GROUP BY database"
+chops query "SELECT * FROM mydb.events LIMIT 10" --format json
+chops query "SELECT * FROM mydb.events LIMIT 10" --format csv
 
 # JSON output for automation
 chops dq profile mydb.events --output json
