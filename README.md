@@ -75,6 +75,8 @@ CHOPS_PROFILE=staging chops dq profile events
 | `chops dq drift <table>` | Detect schema and data quality drift vs last snapshot |
 | `chops dq check <table>` | Run quality checks with configurable thresholds (CI-friendly exit codes) |
 | `chops dq freshness <table>` | Time since last row — OK/WARNING/CRITICAL with exit codes |
+| `chops dq anomalies <table>` | Detect anomalies in daily row counts vs historical baseline |
+| `chops dq compare <t1> <t2>` | Compare schema and row counts between two tables |
 
 ### Ad-hoc Query
 
@@ -112,6 +114,12 @@ chops dq check mydb.events --max-null-pct 5 --min-rows 1000
 
 # Check if a streaming table is still receiving data
 chops dq freshness mydb.events --warn 60 --critical 1440
+
+# Detect row count anomalies (z-score based)
+chops dq anomalies mydb.events --days 14
+
+# Compare schemas between tables
+chops dq compare mydb.events mydb.events_v2
 
 # Ad-hoc query with different output formats
 chops query "SELECT database, count() FROM system.tables GROUP BY database"

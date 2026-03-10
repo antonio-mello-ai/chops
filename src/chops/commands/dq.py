@@ -628,3 +628,243 @@ def drift(
         raise typer.Exit(2)
     if has_drift:
         raise typer.Exit(1)
+
+
+@app.command()
+def anomalies(
+    ctx: typer.Context,
+    table: str = typer.Argument(help="Table to analyze (e.g. 'mydb.events')"),
+    days: int = typer.Option(7, "--days", help="Lookback window for baseline (default 7)"),
+    column: str | None = typer.Option(
+        None,
+        "--column",
+        "-c",
+        help="Date/DateTime column (auto-detected if not provided)",
+    ),
+    z_threshold: float = typer.Option(
+        2.0,
+        "--z-threshold",
+        help="Z-score threshold for anomaly detection",
+    ),
+    output: str = typer.Option("table", "--output", "-o", help="Output format: table, json"),
+) -> None:
+    """Detect anomalies in daily row counts and null rates vs historical baseline."""
+    client = _get_conn(ctx)
+    obj = ctx.obj or {}
+    db, tbl = _resolve_table(table, obj.get("database"))
+
+    # Auto-detect date column
+    if not column:
+        dt_cols = query(
+            client,
+            f"""
+            SELECT name FROM system.columns
+            WHERE database = '{db}' AND table = '{tbl}'
+                AND type LIKE '%Date%'
+            ORDER BY position
+            LIMIT 1
+        """,
+        )
+        if not dt_cols:
+            console.print(f"[red]No Date/DateTime column found in {db}.{tbl}. Use --column.[/red]")
+            raise typer.Exit(1)
+        column = dt_cols[0]["name"]
+
+    # Get daily row counts for the lookback window
+    daily = query(
+        client,
+        f"""
+        SELECT
+            toDate(`{column}`) AS day,
+            count() AS row_count
+        FROM {db}.{tbl}
+        WHERE toDate(`{column}`) >= today() - {days}
+            AND toDate(`{column}`) <= today()
+        GROUP BY day
+        ORDER BY day
+    """,
+    )
+
+    if len(daily) < 3:
+        console.print(
+            f"[yellow]Not enough data for anomaly detection "
+            f"({len(daily)} days, need at least 3).[/yellow]"
+        )
+        return
+
+    # Calculate mean and stddev
+    counts = [int(str(d["row_count"])) for d in daily]
+    mean_count = sum(counts) / len(counts)
+    variance = sum((c - mean_count) ** 2 for c in counts) / len(counts)
+    stddev_count = variance**0.5
+
+    anomaly_list: list[dict[str, object]] = []
+    for d in daily:
+        day = str(d["day"])
+        count = int(str(d["row_count"]))
+
+        z_score = (count - mean_count) / stddev_count if stddev_count > 0 else 0.0
+
+        if abs(z_score) > z_threshold:
+            direction = "high" if z_score > 0 else "low"
+            anomaly_list.append(
+                {
+                    "day": day,
+                    "row_count": count,
+                    "mean": round(mean_count),
+                    "z_score": round(z_score, 2),
+                    "direction": direction,
+                }
+            )
+
+    if output == "json":
+        typer.echo(
+            json_mod.dumps(
+                {
+                    "table": f"{db}.{tbl}",
+                    "column": column,
+                    "days_analyzed": len(daily),
+                    "mean_daily_rows": round(mean_count),
+                    "stddev_daily_rows": round(stddev_count),
+                    "anomalies": anomaly_list,
+                },
+                indent=2,
+                default=str,
+            )
+        )
+    else:
+        console.print(
+            f"\n[bold]{db}.{tbl}[/bold] — {len(daily)} days analyzed "
+            f"(mean: {mean_count:,.0f} rows/day, stddev: {stddev_count:,.0f})\n"
+        )
+
+        if not anomaly_list:
+            console.print("[green]No anomalies detected.[/green]")
+        else:
+            t = Table(title=f"Anomalies (z-score > {z_threshold})")
+            t.add_column("Day", style="bold")
+            t.add_column("Rows", justify="right")
+            t.add_column("Mean", justify="right", style="dim")
+            t.add_column("Z-Score", justify="right")
+            t.add_column("Direction")
+
+            for a in anomaly_list:
+                z = float(str(a["z_score"]))
+                z_style = "red" if z < -z_threshold else "yellow"
+                t.add_row(
+                    str(a["day"]),
+                    f"{int(str(a['row_count'])):,}",
+                    f"{int(str(a['mean'])):,}",
+                    f"[{z_style}]{z:.2f}[/{z_style}]",
+                    str(a["direction"]),
+                )
+
+            console.print(t)
+
+    if anomaly_list:
+        raise typer.Exit(1)
+
+
+@app.command()
+def compare(
+    ctx: typer.Context,
+    table1: str = typer.Argument(help="First table (e.g. 'mydb.events')"),
+    table2: str = typer.Argument(help="Second table (e.g. 'mydb.events_v2')"),
+    output: str = typer.Option("table", "--output", "-o", help="Output format: table, json"),
+) -> None:
+    """Compare schema and row counts between two tables."""
+    client = _get_conn(ctx)
+    obj = ctx.obj or {}
+    db1, tbl1 = _resolve_table(table1, obj.get("database"))
+    db2, tbl2 = _resolve_table(table2, obj.get("database"))
+
+    # Row counts
+    count1 = query(client, f"SELECT count() AS c FROM {db1}.{tbl1}")
+    count2 = query(client, f"SELECT count() AS c FROM {db2}.{tbl2}")
+    rows1 = int(count1[0]["c"]) if count1 else 0
+    rows2 = int(count2[0]["c"]) if count2 else 0
+
+    # Schemas
+    cols1 = query(
+        client,
+        f"SELECT name, type FROM system.columns "
+        f"WHERE database = '{db1}' AND table = '{tbl1}' ORDER BY position",
+    )
+    cols2 = query(
+        client,
+        f"SELECT name, type FROM system.columns "
+        f"WHERE database = '{db2}' AND table = '{tbl2}' ORDER BY position",
+    )
+
+    schema1 = {str(c["name"]): str(c["type"]) for c in cols1}
+    schema2 = {str(c["name"]): str(c["type"]) for c in cols2}
+
+    all_cols = sorted(set(list(schema1.keys()) + list(schema2.keys())))
+
+    diffs: list[dict[str, object]] = []
+    for col in all_cols:
+        t1 = schema1.get(col)
+        t2 = schema2.get(col)
+
+        if t1 and not t2:
+            diffs.append({"column": col, "status": "only in table1", "type1": t1, "type2": "-"})
+        elif t2 and not t1:
+            diffs.append({"column": col, "status": "only in table2", "type1": "-", "type2": t2})
+        elif t1 != t2:
+            diffs.append(
+                {"column": col, "status": "type mismatch", "type1": t1 or "", "type2": t2 or ""}
+            )
+        else:
+            diffs.append({"column": col, "status": "match", "type1": t1 or "", "type2": t2 or ""})
+
+    has_diff = any(d["status"] != "match" for d in diffs) or rows1 != rows2
+
+    if output == "json":
+        typer.echo(
+            json_mod.dumps(
+                {
+                    "table1": f"{db1}.{tbl1}",
+                    "table2": f"{db2}.{tbl2}",
+                    "rows1": rows1,
+                    "rows2": rows2,
+                    "row_diff": rows1 - rows2,
+                    "columns_match": not has_diff,
+                    "columns": diffs,
+                },
+                indent=2,
+                default=str,
+            )
+        )
+    else:
+        row_diff = rows1 - rows2
+        row_style = "green" if row_diff == 0 else "yellow"
+        console.print(f"\n[bold]Comparing[/bold] {db1}.{tbl1} vs {db2}.{tbl2}\n")
+        console.print(f"  {db1}.{tbl1}: {rows1:,} rows")
+        console.print(f"  {db2}.{tbl2}: {rows2:,} rows")
+        console.print(f"  [{row_style}]Difference: {row_diff:+,}[/{row_style}]\n")
+
+        t = Table(title="Schema Comparison")
+        t.add_column("Column", style="bold")
+        t.add_column("Status")
+        t.add_column(f"{db1}.{tbl1}")
+        t.add_column(f"{db2}.{tbl2}")
+
+        for d in diffs:
+            status = str(d["status"])
+            status_style = {
+                "match": "green",
+                "only in table1": "red",
+                "only in table2": "red",
+                "type mismatch": "yellow",
+            }.get(status, "")
+            t.add_row(
+                str(d["column"]),
+                f"[{status_style}]{status}[/{status_style}]",
+                str(d["type1"]),
+                str(d["type2"]),
+            )
+
+        console.print(t)
+
+    if has_diff:
+        raise typer.Exit(1)
