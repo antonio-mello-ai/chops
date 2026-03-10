@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 
 from chops import __version__
-from chops.commands import dq, health
+from chops.commands import dq, health, migrate
 
 app = typer.Typer(
     name="chops",
@@ -15,6 +15,7 @@ app = typer.Typer(
 
 app.add_typer(health.app, name="health", help="Cluster health and observability commands.")
 app.add_typer(dq.app, name="dq", help="Data quality profiling and checks.")
+app.add_typer(migrate.app, name="migrate", help="Schema migration management.")
 
 
 @app.command()

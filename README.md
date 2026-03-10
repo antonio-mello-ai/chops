@@ -1,8 +1,8 @@
 # chops
 
-ClickHouse Operations CLI — health checks, data quality profiling, and observability from your terminal.
+ClickHouse Operations CLI — health checks, data quality profiling, schema migrations, and observability from your terminal.
 
-No more copy-pasting system table queries. One command to check cluster health, profile data quality, or find slow queries.
+No more copy-pasting system table queries. One command to check cluster health, profile data quality, manage schema migrations, or find slow queries.
 
 ## Quick Start
 
@@ -47,6 +47,16 @@ Or use flags: `chops --host myserver --user admin health summary`
 | `chops dq check <table>` | Run quality checks with configurable thresholds (CI-friendly exit codes) |
 | `chops dq freshness <table>` | Time since last row — OK/WARNING/CRITICAL with exit codes |
 
+### Schema Migrations
+
+| Command | Description |
+|---------|-------------|
+| `chops migrate init` | Create migrations directory |
+| `chops migrate new <name>` | Generate a timestamped migration file with up/down sections |
+| `chops migrate status` | Show applied vs pending migrations |
+| `chops migrate up` | Apply pending migrations (all or `--steps N`) |
+| `chops migrate down --confirm` | Revert most recent migration(s) |
+
 ## Examples
 
 ```bash
@@ -70,6 +80,29 @@ chops dq freshness mydb.events --warn 60 --critical 1440
 
 # JSON output for automation
 chops dq profile mydb.events --output json
+
+# Schema migrations
+chops migrate init
+chops migrate new "add_user_scores_table"
+chops migrate up
+chops migrate status
+chops migrate down --confirm
+```
+
+Migration files use a simple format with `-- migrate:up` and `-- migrate:down` sections:
+
+```sql
+-- migrate:up
+CREATE TABLE mydb.user_scores (
+    user_id UInt64,
+    score Float32,
+    updated_at DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY user_id;
+
+-- migrate:down
+DROP TABLE IF EXISTS mydb.user_scores;
 ```
 
 ## CI/CD Integration

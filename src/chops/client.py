@@ -38,3 +38,8 @@ def query(client: Client, sql: str, params: dict[str, Any] | None = None) -> lis
     result = client.query(sql, parameters=params or {})
     columns = result.column_names
     return [dict(zip(columns, row, strict=False)) for row in result.result_rows]
+
+
+def command(client: Client, sql: str) -> None:
+    """Execute a DDL/DML command (no result set)."""
+    client.command(sql)
