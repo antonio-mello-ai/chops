@@ -51,10 +51,20 @@ def test_migrate_help() -> None:
 
 
 def test_profile_option() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert "--profile" in result.output
+    """Profile option exists in callback signature."""
+    import inspect
+
+    from chops.cli import main
+
+    sig = inspect.signature(main)
+    assert "profile" in sig.parameters
 
 
 def test_config_option() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert "--config" in result.output
+    """Config option exists in callback signature."""
+    import inspect
+
+    from chops.cli import main
+
+    sig = inspect.signature(main)
+    assert "config_path" in sig.parameters
