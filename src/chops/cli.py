@@ -27,19 +27,38 @@ def version() -> None:
 def main(
     ctx: typer.Context,
     host: str | None = typer.Option(
-        None, "--host", "-h", envvar="CLICKHOUSE_HOST", help="ClickHouse host",
+        None,
+        "--host",
+        "-h",
+        envvar="CLICKHOUSE_HOST",
+        help="ClickHouse host",
     ),
     port: int | None = typer.Option(
-        None, "--port", "-p", envvar="CLICKHOUSE_PORT", help="ClickHouse HTTP port",
+        None,
+        "--port",
+        "-p",
+        envvar="CLICKHOUSE_PORT",
+        help="ClickHouse HTTP port",
     ),
     user: str | None = typer.Option(
-        None, "--user", "-u", envvar="CLICKHOUSE_USER", help="ClickHouse user",
+        None,
+        "--user",
+        "-u",
+        envvar="CLICKHOUSE_USER",
+        help="ClickHouse user",
     ),
     password: str | None = typer.Option(
-        None, "--password", envvar="CLICKHOUSE_PASSWORD", help="ClickHouse password",
+        None,
+        "--password",
+        envvar="CLICKHOUSE_PASSWORD",
+        help="ClickHouse password",
     ),
     database: str | None = typer.Option(
-        None, "--database", "-d", envvar="CLICKHOUSE_DATABASE", help="Default database",
+        None,
+        "--database",
+        "-d",
+        envvar="CLICKHOUSE_DATABASE",
+        help="Default database",
     ),
 ) -> None:
     """Global connection options."""

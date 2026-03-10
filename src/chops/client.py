@@ -25,7 +25,8 @@ def get_client(
         password=password if password is not None else os.getenv("CLICKHOUSE_PASSWORD", ""),
         database=database if database is not None else os.getenv("CLICKHOUSE_DATABASE", "default"),
         secure=(
-            secure if secure is not None
+            secure
+            if secure is not None
             else os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true"
         ),
         connect_timeout=10,

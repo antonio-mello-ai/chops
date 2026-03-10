@@ -43,25 +43,31 @@ def summary(ctx: typer.Context) -> None:
     # Counts
     sys_dbs = "('system', 'INFORMATION_SCHEMA', 'information_schema')"
     db_count = query(
-        client, f"SELECT count() AS c FROM system.databases WHERE name NOT IN {sys_dbs}",
+        client,
+        f"SELECT count() AS c FROM system.databases WHERE name NOT IN {sys_dbs}",
     )
     table_count = query(
-        client, f"SELECT count() AS c FROM system.tables WHERE database NOT IN {sys_dbs}",
+        client,
+        f"SELECT count() AS c FROM system.tables WHERE database NOT IN {sys_dbs}",
     )
     parts_count = query(client, "SELECT count() AS c FROM system.parts WHERE active")
     merges_count = query(client, "SELECT count() AS c FROM system.merges")
     queries_count = query(
-        client, "SELECT count() AS c FROM system.processes WHERE is_initial_query",
+        client,
+        "SELECT count() AS c FROM system.processes WHERE is_initial_query",
     )
 
     # Disk usage
-    disk = query(client, """
+    disk = query(
+        client,
+        """
         SELECT
             formatReadableSize(sum(bytes_on_disk)) AS total_size,
             sum(rows) AS total_rows
         FROM system.parts
         WHERE active
-    """)
+    """,
+    )
 
     table = Table(title="ClickHouse Health Summary", show_header=False, border_style="dim")
     table.add_column("Metric", style="bold")
@@ -94,7 +100,9 @@ def table_sizes(
     if database:
         where += f" AND database = '{database}'"
 
-    rows = query(client, f"""
+    rows = query(
+        client,
+        f"""
         SELECT
             database,
             name AS table_name,
@@ -119,7 +127,8 @@ def table_sizes(
         )
         ORDER BY total_bytes DESC
         LIMIT {limit}
-    """)
+    """,
+    )
 
     table = Table(title=f"Top {limit} Tables by Size")
     table.add_column("Database", style="cyan")
@@ -131,8 +140,12 @@ def table_sizes(
 
     for r in rows:
         table.add_row(
-            r["database"], r["table_name"], r["engine"],
-            r["size"], r["rows"], str(r["partition_count"]),
+            r["database"],
+            r["table_name"],
+            r["engine"],
+            r["size"],
+            r["rows"],
+            str(r["partition_count"]),
         )
 
     console.print(table)
@@ -147,7 +160,9 @@ def slow_queries(
     """Show slowest queries from the query log."""
     client = _get_conn(ctx)
 
-    rows = query(client, f"""
+    rows = query(
+        client,
+        f"""
         SELECT
             type,
             query_duration_ms / 1000 AS duration_s,
@@ -163,7 +178,8 @@ def slow_queries(
             AND is_initial_query
         ORDER BY query_duration_ms DESC
         LIMIT {limit}
-    """)
+    """,
+    )
 
     table = Table(title=f"Top {limit} Slow Queries (last {hours}h)")
     table.add_column("#", justify="right", style="dim")
@@ -177,8 +193,13 @@ def slow_queries(
     for i, r in enumerate(rows, 1):
         dur = f"{r['duration_s']:.1f}s"
         table.add_row(
-            str(i), dur, r["read_size"], f"{int(r['read_rows']):,}",
-            r["peak_memory"], r["user"], r["query_preview"],
+            str(i),
+            dur,
+            r["read_size"],
+            f"{int(r['read_rows']):,}",
+            r["peak_memory"],
+            r["user"],
+            r["query_preview"],
         )
 
     console.print(table)
@@ -189,7 +210,9 @@ def merges(ctx: typer.Context) -> None:
     """Show currently running merges."""
     client = _get_conn(ctx)
 
-    rows = query(client, """
+    rows = query(
+        client,
+        """
         SELECT
             database,
             table,
@@ -201,7 +224,8 @@ def merges(ctx: typer.Context) -> None:
             formatReadableSize(bytes_written_uncompressed) AS bytes_written
         FROM system.merges
         ORDER BY elapsed DESC
-    """)
+    """,
+    )
 
     if not rows:
         console.print("[green]No active merges.[/green]")
@@ -217,8 +241,12 @@ def merges(ctx: typer.Context) -> None:
 
     for r in rows:
         table.add_row(
-            r["database"], r["table"], f"{r['progress_pct']}%",
-            f"{r['elapsed_s']}s", str(r["num_parts"]), r["size"],
+            r["database"],
+            r["table"],
+            f"{r['progress_pct']}%",
+            f"{r['elapsed_s']}s",
+            str(r["num_parts"]),
+            r["size"],
         )
 
     console.print(table)
@@ -229,7 +257,9 @@ def running_queries(ctx: typer.Context) -> None:
     """Show currently running queries."""
     client = _get_conn(ctx)
 
-    rows = query(client, """
+    rows = query(
+        client,
+        """
         SELECT
             query_id,
             user,
@@ -241,7 +271,8 @@ def running_queries(ctx: typer.Context) -> None:
         FROM system.processes
         WHERE is_initial_query
         ORDER BY elapsed DESC
-    """)
+    """,
+    )
 
     if not rows:
         console.print("[green]No running queries.[/green]")
@@ -256,8 +287,11 @@ def running_queries(ctx: typer.Context) -> None:
 
     for r in rows:
         table.add_row(
-            f"{r['elapsed_s']}s", r["user"], r["read_size"],
-            r["memory"], r["query_preview"],
+            f"{r['elapsed_s']}s",
+            r["user"],
+            r["read_size"],
+            r["memory"],
+            r["query_preview"],
         )
 
     console.print(table)
