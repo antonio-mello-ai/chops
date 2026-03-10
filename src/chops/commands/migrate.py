@@ -356,3 +356,74 @@ def down(
             raise typer.Exit(1) from None
 
     console.print(f"\n[green]{len(to_revert)} migration(s) reverted.[/green]")
+
+
+@app.command()
+def validate(
+    directory: str = typer.Option(DEFAULT_DIR, "--dir", "-d", help="Migrations directory"),
+) -> None:
+    """Validate migration files: check structure, naming, and content."""
+    migrations_dir = _migrations_dir(directory)
+    all_files = _discover_migrations(migrations_dir)
+
+    if not all_files:
+        console.print("[yellow]No migration files found.[/yellow]")
+        return
+
+    errors: list[tuple[str, str]] = []
+    warnings: list[tuple[str, str]] = []
+
+    # Check for duplicate versions
+    versions: dict[str, list[str]] = {}
+    for f in all_files:
+        v = _version_from_path(f)
+        versions.setdefault(v, []).append(f.name)
+
+    for v, files in versions.items():
+        if len(files) > 1:
+            errors.append((v, f"Duplicate version: {', '.join(files)}"))
+
+    for migration_file in all_files:
+        version = _version_from_path(migration_file)
+        name = _name_from_path(migration_file)
+        label = f"{version}_{name}"
+
+        # Check version format (should be numeric timestamp)
+        if not version.isdigit():
+            errors.append((label, "Version prefix is not numeric"))
+            continue
+
+        if len(version) != 14:
+            msg = f"Version has {len(version)} digits (expected 14: YYYYMMDDHHMMSS)"
+            warnings.append((label, msg))
+
+        up_statements, down_statements = _parse_migration(migration_file)
+
+        # Check that up section has content
+        if not up_statements:
+            errors.append((label, "Empty UP section — nothing to apply"))
+        else:
+            console.print(
+                f"  [green]ok[/green]   {label}: "
+                f"{len(up_statements)} up, {len(down_statements)} down"
+            )
+
+        # Warn if no down section
+        if not down_statements:
+            warnings.append((label, "No DOWN section (migration is not reversible)"))
+
+    console.print()
+
+    for label, msg in warnings:
+        console.print(f"  [yellow]warn[/yellow] {label}: {msg}")
+
+    for label, msg in errors:
+        console.print(f"  [red]fail[/red] {label}: {msg}")
+
+    if warnings:
+        console.print()
+
+    if errors:
+        console.print(f"\n[red]{len(errors)} error(s) in {len(all_files)} migration(s).[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]{len(all_files)} migration(s) validated successfully.[/green]")

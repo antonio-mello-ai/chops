@@ -33,3 +33,28 @@ def test_dq_help() -> None:
     assert "profile" in result.output
     assert "freshness" in result.output
     assert "check" in result.output
+    assert "anomalies" in result.output
+    assert "compare" in result.output
+
+
+def test_query_help() -> None:
+    result = runner.invoke(app, ["query", "--help"])
+    assert result.exit_code == 0
+    assert "SQL" in result.output or "sql" in result.output
+    assert "format" in result.output.lower()
+
+
+def test_migrate_help() -> None:
+    result = runner.invoke(app, ["migrate", "--help"])
+    assert result.exit_code == 0
+    assert "validate" in result.output
+
+
+def test_profile_option() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert "--profile" in result.output
+
+
+def test_config_option() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert "--config" in result.output

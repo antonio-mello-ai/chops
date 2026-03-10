@@ -93,6 +93,7 @@ CHOPS_PROFILE=staging chops dq profile events
 | `chops migrate status` | Show applied vs pending migrations |
 | `chops migrate up` | Apply pending migrations (all or `--steps N`) |
 | `chops migrate down --confirm` | Revert most recent migration(s) |
+| `chops migrate validate` | Validate migration files: structure, naming, content |
 
 ## Examples
 

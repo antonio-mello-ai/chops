@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chops"
-version = "0.6.0"
+version = "1.0.0"
 description = "ClickHouse Operations CLI — health checks, data quality, schema migrations, and observability"
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Antonio Mello", email = "antonio.mello@felhen.com.br" }]
 keywords = ["clickhouse", "cli", "data-quality", "observability", "database", "operations"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
