@@ -38,12 +38,15 @@ Or use flags: `chops --host myserver --user admin health summary`
 | `chops health slow-queries` | Top N slowest queries from query log |
 | `chops health merges` | Currently running merge operations |
 | `chops health running-queries` | Active queries with elapsed time and memory |
+| `chops health replication` | Replication status with lag and queue metrics |
+| `chops health partitions` | Partition analysis: detect merge pressure |
 
 ### Data Quality
 
 | Command | Description |
 |---------|-------------|
 | `chops dq profile <table>` | Column-level profiling: null rates, cardinality, min/max |
+| `chops dq drift <table>` | Detect schema and data quality drift vs last snapshot |
 | `chops dq check <table>` | Run quality checks with configurable thresholds (CI-friendly exit codes) |
 | `chops dq freshness <table>` | Time since last row — OK/WARNING/CRITICAL with exit codes |
 

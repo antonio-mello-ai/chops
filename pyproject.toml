@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chops"
-version = "0.3.0"
+version = "0.4.0"
 description = "ClickHouse Operations CLI — health checks, data quality, schema migrations, and observability"
 readme = "README.md"
 license = "MIT"

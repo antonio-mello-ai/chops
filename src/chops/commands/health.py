@@ -295,3 +295,171 @@ def running_queries(ctx: typer.Context) -> None:
         )
 
     console.print(table)
+
+
+@app.command()
+def replication(ctx: typer.Context) -> None:
+    """Show replication status for replicated tables."""
+    client = _get_conn(ctx)
+
+    rows = query(
+        client,
+        """
+        SELECT
+            database,
+            table,
+            is_leader,
+            total_replicas,
+            active_replicas,
+            queue_size,
+            inserts_in_queue,
+            merges_in_queue,
+            log_max_index - log_pointer AS log_delay,
+            absolute_delay,
+            last_queue_update
+        FROM system.replicas
+        ORDER BY absolute_delay DESC
+    """,
+    )
+
+    if not rows:
+        console.print("[green]No replicated tables found.[/green]")
+        return
+
+    # Determine overall status
+    max_delay = max(int(r["absolute_delay"]) for r in rows)
+    unhealthy = [r for r in rows if int(r["active_replicas"]) < int(r["total_replicas"])]
+
+    if unhealthy:
+        console.print(
+            f"[bold red]UNHEALTHY[/bold red] — {len(unhealthy)} table(s) with missing replicas\n"
+        )
+    elif max_delay > 300:
+        console.print(f"[bold yellow]WARNING[/bold yellow] — max replication delay: {max_delay}s\n")
+    else:
+        console.print(f"[bold green]OK[/bold green] — {len(rows)} replicated table(s)\n")
+
+    table = Table(title=f"Replication Status ({len(rows)} tables)")
+    table.add_column("Database", style="cyan")
+    table.add_column("Table", style="bold")
+    table.add_column("Leader")
+    table.add_column("Replicas", justify="right")
+    table.add_column("Queue", justify="right")
+    table.add_column("Log Delay", justify="right")
+    table.add_column("Abs Delay", justify="right")
+
+    for r in rows:
+        active = int(r["active_replicas"])
+        total = int(r["total_replicas"])
+        replica_str = f"{active}/{total}"
+        replica_style = "" if active == total else "red"
+
+        delay = int(r["absolute_delay"])
+        delay_style = ""
+        if delay > 300:
+            delay_style = "red"
+        elif delay > 60:
+            delay_style = "yellow"
+
+        queue = int(r["queue_size"])
+        queue_style = "yellow" if queue > 100 else ""
+
+        table.add_row(
+            r["database"],
+            r["table"],
+            "yes" if r["is_leader"] else "no",
+            f"[{replica_style}]{replica_str}[/{replica_style}]" if replica_style else replica_str,
+            f"[{queue_style}]{queue}[/{queue_style}]" if queue_style else str(queue),
+            str(int(r["log_delay"])),
+            f"[{delay_style}]{delay}s[/{delay_style}]" if delay_style else f"{delay}s",
+        )
+
+    console.print(table)
+
+    if unhealthy:
+        raise typer.Exit(2)
+    if max_delay > 300:
+        raise typer.Exit(1)
+
+
+@app.command()
+def partitions(
+    ctx: typer.Context,
+    limit: int = typer.Option(20, "--limit", "-n", help="Number of tables to show"),
+    database: str | None = typer.Option(
+        None,
+        "--database",
+        "-d",
+        help="Filter by database",
+    ),
+    warn_parts: int = typer.Option(
+        300,
+        "--warn-parts",
+        help="Warn if a partition has more than N active parts",
+    ),
+) -> None:
+    """Analyze partitions: detect merge pressure and oversized partitions."""
+    client = _get_conn(ctx)
+
+    sys_dbs = "('system', 'INFORMATION_SCHEMA', 'information_schema')"
+    where = f"WHERE database NOT IN {sys_dbs}"
+    if database:
+        where += f" AND database = '{database}'"
+
+    rows = query(
+        client,
+        f"""
+        SELECT
+            database,
+            table,
+            partition,
+            count() AS part_count,
+            sum(rows) AS total_rows,
+            formatReadableSize(sum(bytes_on_disk)) AS size,
+            min(modification_time) AS oldest_part,
+            max(modification_time) AS newest_part
+        FROM system.parts
+        {where}
+        AND active
+        GROUP BY database, table, partition
+        HAVING part_count > 1
+        ORDER BY part_count DESC
+        LIMIT {limit}
+    """,
+    )
+
+    if not rows:
+        console.print("[green]No partitions with multiple parts.[/green]")
+        return
+
+    has_warning = any(int(r["part_count"]) > warn_parts for r in rows)
+
+    table = Table(title=f"Partition Analysis (top {limit} by part count)")
+    table.add_column("Database", style="cyan")
+    table.add_column("Table", style="bold")
+    table.add_column("Partition")
+    table.add_column("Parts", justify="right")
+    table.add_column("Rows", justify="right")
+    table.add_column("Size", justify="right")
+
+    for r in rows:
+        parts = int(r["part_count"])
+        parts_style = ""
+        if parts > warn_parts:
+            parts_style = "red"
+        elif parts > warn_parts // 2:
+            parts_style = "yellow"
+
+        table.add_row(
+            r["database"],
+            r["table"],
+            str(r["partition"]),
+            f"[{parts_style}]{parts}[/{parts_style}]" if parts_style else str(parts),
+            f"{int(r['total_rows']):,}",
+            r["size"],
+        )
+
+    console.print(table)
+
+    if has_warning:
+        console.print(f"\n[yellow]Partitions with >{warn_parts} parts may need OPTIMIZE.[/yellow]")
