@@ -156,7 +156,8 @@ DROP TABLE IF EXISTS mydb.user_scores;
 
 ## CI/CD Integration
 
-`chops dq check` and `chops dq freshness` return non-zero exit codes on failure, making them usable in CI pipelines:
+`chops dq check` and `chops dq freshness` return non-zero exit codes on failure.
+See [Exit codes](#exit-codes) for the full contract.
 
 ```yaml
 - name: Data quality gate
@@ -164,6 +165,30 @@ DROP TABLE IF EXISTS mydb.user_scores;
     chops dq check production.orders --max-null-pct 2 --min-rows 10000
     chops dq freshness production.orders --warn 30 --critical 120
 ```
+
+## Exit codes
+
+CI-facing checks use `0` for OK, `1` for a warning or soft failure, and `2` for a
+critical failure or missing required data.
+
+| Command | Exit code | Meaning |
+|---------|-----------|---------|
+| `chops dq check <table>` | `0` | All configured checks passed |
+| `chops dq check <table>` | `1` | One or more configured checks failed |
+| `chops dq check <table>` | `2` | The table was not found |
+| `chops dq freshness <table>` | `0` | Freshness is OK |
+| `chops dq freshness <table>` | `1` | Data age is at or above `--warn`, or no DateTime column was found |
+| `chops dq freshness <table>` | `2` | Data age is at or above `--critical`, or the table/column has no data |
+| `chops dq drift <table>` | `0` | No drift was detected, or the command saved the first baseline snapshot |
+| `chops dq drift <table>` | `1` | Warning-level drift was detected |
+| `chops dq drift <table>` | `2` | Critical drift was detected, such as a dropped column or type change |
+| `chops dq anomalies <table>` | `0` | No anomalies were detected, or there was not enough history to evaluate |
+| `chops dq anomalies <table>` | `1` | One or more anomalies were detected, or no date column was found |
+| `chops dq compare <table1> <table2>` | `0` | Row counts and schemas match |
+| `chops dq compare <table1> <table2>` | `1` | Row counts or schemas differ |
+| `chops health replication` | `0` | Replication is healthy, or no replicated tables were found |
+| `chops health replication` | `1` | Replication delay exceeded the warning threshold |
+| `chops health replication` | `2` | One or more replicated tables have missing replicas |
 
 ## Development
 
