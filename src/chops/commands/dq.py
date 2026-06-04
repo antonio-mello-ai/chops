@@ -9,7 +9,7 @@ from clickhouse_connect.driver.client import Client
 from rich.console import Console
 from rich.table import Table
 
-from chops.client import command, get_client, query
+from chops.client import command, get_client, query, quote_identifier
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -45,27 +45,30 @@ def _build_profile(
     sample: int | None = None,
 ) -> tuple[int, list[dict[str, object]]]:
     """Profile a table and return (total_rows, column_profiles)."""
+    qtable = f"{quote_identifier(db)}.{quote_identifier(tbl)}"
+
     cols = query(
         client,
-        f"""
+        """
         SELECT name, type
         FROM system.columns
-        WHERE database = '{db}' AND table = '{tbl}'
+        WHERE database = {db:String} AND table = {tbl:String}
         ORDER BY position
     """,
+        {"db": db, "tbl": tbl},
     )
 
     if not cols:
         return 0, []
 
-    count_result = query(client, f"SELECT count() AS c FROM {db}.{tbl}")
+    count_result = query(client, f"SELECT count() AS c FROM {qtable}")
     total_rows = int(count_result[0]["c"]) if count_result else 0
 
     select_parts: list[str] = []
     for col in cols:
         name = col["name"]
         col_type = col["type"]
-        escaped = f"`{name}`"
+        escaped = quote_identifier(str(name))
 
         select_parts.append(f"countIf({escaped} IS NULL) AS `{name}__nulls`")
         select_parts.append(f"uniq({escaped}) AS `{name}__cardinality`")
@@ -74,9 +77,13 @@ def _build_profile(
             select_parts.append(f"min({escaped}) AS `{name}__min`")
             select_parts.append(f"max({escaped}) AS `{name}__max`")
 
-    source = f"(SELECT * FROM {db}.{tbl} LIMIT {sample})" if sample else f"{db}.{tbl}"
+    source = f"(SELECT * FROM {qtable} LIMIT {{sample:UInt64}})" if sample else qtable
 
-    profile_result = query(client, f"SELECT {', '.join(select_parts)} FROM {source}")
+    profile_result = query(
+        client,
+        f"SELECT {', '.join(select_parts)} FROM {source}",
+        {"sample": sample} if sample else None,
+    )
     stats = profile_result[0] if profile_result else {}
 
     row_base = sample if sample else total_rows
@@ -182,31 +189,35 @@ def freshness(
     obj = ctx.obj or {}
     db, tbl = _resolve_table(table, obj.get("database"))
 
+    qtable = f"{quote_identifier(db)}.{quote_identifier(tbl)}"
+
     # Auto-detect datetime column
     if not column:
         dt_cols = query(
             client,
-            f"""
+            """
             SELECT name FROM system.columns
-            WHERE database = '{db}' AND table = '{tbl}'
+            WHERE database = {db:String} AND table = {tbl:String}
                 AND type LIKE '%DateTime%'
             ORDER BY position
             LIMIT 1
         """,
+            {"db": db, "tbl": tbl},
         )
         if not dt_cols:
             msg = f"No DateTime column found in {db}.{tbl}. Use --column to specify."
             console.print(f"[red]{msg}[/red]")
             raise typer.Exit(1)
-        column = dt_cols[0]["name"]
+        column = str(dt_cols[0]["name"])
 
+    qcolumn = quote_identifier(column)
     result = query(
         client,
         f"""
         SELECT
-            max(`{column}`) AS latest,
-            dateDiff('minute', max(`{column}`), now()) AS minutes_ago
-        FROM {db}.{tbl}
+            max({qcolumn}) AS latest,
+            dateDiff('minute', max({qcolumn}), now()) AS minutes_ago
+        FROM {qtable}
     """,
     )
 
@@ -259,19 +270,22 @@ def check(
     obj = ctx.obj or {}
     db, tbl = _resolve_table(table, obj.get("database"))
 
+    qtable = f"{quote_identifier(db)}.{quote_identifier(tbl)}"
+
     # Row count
-    count_result = query(client, f"SELECT count() AS c FROM {db}.{tbl}")
+    count_result = query(client, f"SELECT count() AS c FROM {qtable}")
     total_rows = int(count_result[0]["c"]) if count_result else 0
 
     # Columns
     cols = query(
         client,
-        f"""
+        """
         SELECT name, type
         FROM system.columns
-        WHERE database = '{db}' AND table = '{tbl}'
+        WHERE database = {db:String} AND table = {tbl:String}
         ORDER BY position
     """,
+        {"db": db, "tbl": tbl},
     )
 
     if not cols:
@@ -279,8 +293,10 @@ def check(
         raise typer.Exit(2)
 
     # Null checks
-    select_parts = [f"countIf(`{c['name']}` IS NULL) AS `{c['name']}__nulls`" for c in cols]
-    null_result = query(client, f"SELECT {', '.join(select_parts)} FROM {db}.{tbl}")
+    select_parts = [
+        f"countIf({quote_identifier(str(c['name']))} IS NULL) AS `{c['name']}__nulls`" for c in cols
+    ]
+    null_result = query(client, f"SELECT {', '.join(select_parts)} FROM {qtable}")
     null_stats = null_result[0] if null_result else {}
 
     failures: list[dict[str, object]] = []
@@ -359,10 +375,11 @@ def check(
 
 def _ensure_snapshot_table(client: Client, database: str) -> None:
     """Create the DQ snapshots table if it doesn't exist."""
+    qsnapshot = f"{quote_identifier(database)}.{quote_identifier(SNAPSHOT_TABLE)}"
     command(
         client,
         f"""
-        CREATE TABLE IF NOT EXISTS {database}.{SNAPSHOT_TABLE} (
+        CREATE TABLE IF NOT EXISTS {qsnapshot} (
             table_database String,
             table_name String,
             column_name String,
@@ -388,14 +405,26 @@ def _save_snapshot(
     results: list[dict[str, object]],
 ) -> None:
     """Save current profile as a snapshot."""
+    qsnapshot = f"{quote_identifier(database)}.{quote_identifier(SNAPSHOT_TABLE)}"
     for r in results:
         command(
             client,
-            f"INSERT INTO {database}.{SNAPSHOT_TABLE} "
-            f"(table_database, table_name, column_name, column_type, "
-            f"null_count, null_pct, cardinality, total_rows) VALUES "
-            f"('{db}', '{tbl}', '{r['column']}', '{r['type']}', "
-            f"{r['null_count']}, {r['null_pct']}, {r['cardinality']}, {total_rows})",
+            f"INSERT INTO {qsnapshot} "
+            "(table_database, table_name, column_name, column_type, "
+            "null_count, null_pct, cardinality, total_rows) VALUES "
+            "({db:String}, {tbl:String}, {column:String}, {col_type:String}, "
+            "{null_count:UInt64}, {null_pct:Float64}, {cardinality:UInt64}, "
+            "{total_rows:UInt64})",
+            {
+                "db": db,
+                "tbl": tbl,
+                "column": str(r["column"]),
+                "col_type": str(r["type"]),
+                "null_count": int(str(r["null_count"])),
+                "null_pct": float(str(r["null_pct"])),
+                "cardinality": int(str(r["cardinality"])),
+                "total_rows": total_rows,
+            },
         )
 
 
@@ -406,21 +435,23 @@ def _get_last_snapshot(
     tbl: str,
 ) -> list[dict[str, object]]:
     """Get the most recent snapshot for a table."""
+    qsnapshot = f"{quote_identifier(database)}.{quote_identifier(SNAPSHOT_TABLE)}"
     return query(
         client,
         f"""
         SELECT
             column_name, column_type, null_count, null_pct,
             cardinality, total_rows, snapshot_at
-        FROM {database}.{SNAPSHOT_TABLE}
-        WHERE table_database = '{db}' AND table_name = '{tbl}'
+        FROM {qsnapshot}
+        WHERE table_database = {{db:String}} AND table_name = {{tbl:String}}
             AND snapshot_at = (
                 SELECT max(snapshot_at)
-                FROM {database}.{SNAPSHOT_TABLE}
-                WHERE table_database = '{db}' AND table_name = '{tbl}'
+                FROM {qsnapshot}
+                WHERE table_database = {{db:String}} AND table_name = {{tbl:String}}
             )
         ORDER BY column_name
         """,
+        {"db": db, "tbl": tbl},
     )
 
 
@@ -653,36 +684,41 @@ def anomalies(
     obj = ctx.obj or {}
     db, tbl = _resolve_table(table, obj.get("database"))
 
+    qtable = f"{quote_identifier(db)}.{quote_identifier(tbl)}"
+
     # Auto-detect date column
     if not column:
         dt_cols = query(
             client,
-            f"""
+            """
             SELECT name FROM system.columns
-            WHERE database = '{db}' AND table = '{tbl}'
+            WHERE database = {db:String} AND table = {tbl:String}
                 AND type LIKE '%Date%'
             ORDER BY position
             LIMIT 1
         """,
+            {"db": db, "tbl": tbl},
         )
         if not dt_cols:
             console.print(f"[red]No Date/DateTime column found in {db}.{tbl}. Use --column.[/red]")
             raise typer.Exit(1)
-        column = dt_cols[0]["name"]
+        column = str(dt_cols[0]["name"])
 
+    qcolumn = quote_identifier(column)
     # Get daily row counts for the lookback window
     daily = query(
         client,
         f"""
         SELECT
-            toDate(`{column}`) AS day,
+            toDate({qcolumn}) AS day,
             count() AS row_count
-        FROM {db}.{tbl}
-        WHERE toDate(`{column}`) >= today() - {days}
-            AND toDate(`{column}`) <= today()
+        FROM {qtable}
+        WHERE toDate({qcolumn}) >= today() - {{days:UInt32}}
+            AND toDate({qcolumn}) <= today()
         GROUP BY day
         ORDER BY day
     """,
+        {"days": days},
     )
 
     if len(daily) < 3:
@@ -778,22 +814,27 @@ def compare(
     db1, tbl1 = _resolve_table(table1, obj.get("database"))
     db2, tbl2 = _resolve_table(table2, obj.get("database"))
 
+    qtable1 = f"{quote_identifier(db1)}.{quote_identifier(tbl1)}"
+    qtable2 = f"{quote_identifier(db2)}.{quote_identifier(tbl2)}"
+
     # Row counts
-    count1 = query(client, f"SELECT count() AS c FROM {db1}.{tbl1}")
-    count2 = query(client, f"SELECT count() AS c FROM {db2}.{tbl2}")
+    count1 = query(client, f"SELECT count() AS c FROM {qtable1}")
+    count2 = query(client, f"SELECT count() AS c FROM {qtable2}")
     rows1 = int(count1[0]["c"]) if count1 else 0
     rows2 = int(count2[0]["c"]) if count2 else 0
 
     # Schemas
     cols1 = query(
         client,
-        f"SELECT name, type FROM system.columns "
-        f"WHERE database = '{db1}' AND table = '{tbl1}' ORDER BY position",
+        "SELECT name, type FROM system.columns "
+        "WHERE database = {db:String} AND table = {tbl:String} ORDER BY position",
+        {"db": db1, "tbl": tbl1},
     )
     cols2 = query(
         client,
-        f"SELECT name, type FROM system.columns "
-        f"WHERE database = '{db2}' AND table = '{tbl2}' ORDER BY position",
+        "SELECT name, type FROM system.columns "
+        "WHERE database = {db:String} AND table = {tbl:String} ORDER BY position",
+        {"db": db2, "tbl": tbl2},
     )
 
     schema1 = {str(c["name"]): str(c["type"]) for c in cols1}

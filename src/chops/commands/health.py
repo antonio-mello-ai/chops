@@ -97,8 +97,10 @@ def table_sizes(
     client = _get_conn(ctx)
 
     where = "WHERE database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')"
+    params: dict[str, object] = {"limit": limit}
     if database:
-        where += f" AND database = '{database}'"
+        where += " AND database = {database:String}"
+        params["database"] = database
 
     rows = query(
         client,
@@ -126,8 +128,9 @@ def table_sizes(
             GROUP BY database, table, engine
         )
         ORDER BY total_bytes DESC
-        LIMIT {limit}
+        LIMIT {{limit:UInt64}}
     """,
+        params,
     )
 
     table = Table(title=f"Top {limit} Tables by Size")
@@ -172,13 +175,14 @@ def slow_queries(
             user,
             substring(query, 1, 120) AS query_preview
         FROM system.query_log
-        WHERE event_time > now() - INTERVAL {hours} HOUR
+        WHERE event_time > now() - INTERVAL {hours:UInt32} HOUR
             AND type IN ('QueryFinish', 'ExceptionWhileProcessing')
             AND query_kind = 'Select'
             AND is_initial_query
         ORDER BY query_duration_ms DESC
-        LIMIT {limit}
+        LIMIT {limit:UInt64}
     """,
+        {"hours": hours, "limit": limit},
     )
 
     table = Table(title=f"Top {limit} Slow Queries (last {hours}h)")
@@ -403,8 +407,10 @@ def partitions(
 
     sys_dbs = "('system', 'INFORMATION_SCHEMA', 'information_schema')"
     where = f"WHERE database NOT IN {sys_dbs}"
+    params: dict[str, object] = {"limit": limit}
     if database:
-        where += f" AND database = '{database}'"
+        where += " AND database = {database:String}"
+        params["database"] = database
 
     rows = query(
         client,
@@ -424,8 +430,9 @@ def partitions(
         GROUP BY database, table, partition
         HAVING part_count > 1
         ORDER BY part_count DESC
-        LIMIT {limit}
+        LIMIT {{limit:UInt64}}
     """,
+        params,
     )
 
     if not rows:

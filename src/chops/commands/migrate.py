@@ -11,7 +11,7 @@ from clickhouse_connect.driver.client import Client
 from rich.console import Console
 from rich.table import Table
 
-from chops.client import command, get_client, query
+from chops.client import command, get_client, query, quote_identifier
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -49,10 +49,11 @@ def _migrations_dir(directory: str) -> Path:
 
 def _ensure_tracking_table(client: Client, database: str) -> None:
     """Create the migrations tracking table if it doesn't exist."""
+    qtable = f"{quote_identifier(database)}.{quote_identifier(TRACKING_TABLE)}"
     command(
         client,
         f"""
-        CREATE TABLE IF NOT EXISTS {database}.{TRACKING_TABLE} (
+        CREATE TABLE IF NOT EXISTS {qtable} (
             version String,
             name String,
             applied_at DateTime DEFAULT now()
@@ -65,11 +66,12 @@ def _ensure_tracking_table(client: Client, database: str) -> None:
 
 def _applied_versions(client: Client, database: str) -> list[dict[str, object]]:
     """Get list of applied migrations, ordered by version."""
+    qtable = f"{quote_identifier(database)}.{quote_identifier(TRACKING_TABLE)}"
     return query(
         client,
         f"""
         SELECT version, name, applied_at
-        FROM {database}.{TRACKING_TABLE}
+        FROM {qtable}
         ORDER BY version
         """,
     )
@@ -263,10 +265,12 @@ def up(
                 command(client, stmt)
 
             # Record migration
+            qtable = f"{quote_identifier(database)}.{quote_identifier(TRACKING_TABLE)}"
             command(
                 client,
-                f"INSERT INTO {database}.{TRACKING_TABLE} (version, name) "
-                f"VALUES ('{version}', '{name}')",
+                f"INSERT INTO {qtable} (version, name) "
+                "VALUES ({version:String}, {name:String})",
+                {"version": version, "name": name},
             )
             console.print("[green]done[/green]")
         except Exception as e:
@@ -328,12 +332,14 @@ def down(
 
         _, down_statements = _parse_migration(migration_file)
 
+        qtable = f"{quote_identifier(database)}.{quote_identifier(TRACKING_TABLE)}"
         if not down_statements:
             console.print("[yellow]skipped (no down section)[/yellow]")
             # Still remove from tracking
             command(
                 client,
-                f"ALTER TABLE {database}.{TRACKING_TABLE} DELETE WHERE version = '{version}'",
+                f"ALTER TABLE {qtable} DELETE WHERE version = {{version:String}}",
+                {"version": version},
             )
             continue
 
@@ -343,7 +349,8 @@ def down(
 
             command(
                 client,
-                f"ALTER TABLE {database}.{TRACKING_TABLE} DELETE WHERE version = '{version}'",
+                f"ALTER TABLE {qtable} DELETE WHERE version = {{version:String}}",
+                {"version": version},
             )
             console.print("[green]done[/green]")
         except Exception as e:
