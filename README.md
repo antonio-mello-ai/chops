@@ -180,6 +180,7 @@ critical failure or missing required data.
 | `chops dq freshness <table>` | `1` | Data age is at or above `--warn`, or no DateTime column was found |
 | `chops dq freshness <table>` | `2` | Data age is at or above `--critical`, or the table/column has no data |
 | `chops dq drift <table>` | `0` | No drift was detected, or the command saved the first baseline snapshot |
+| `chops dq drift <table>` | `1` | The table was not found |
 | `chops dq drift <table>` | `1` | Warning-level drift was detected |
 | `chops dq drift <table>` | `2` | Critical drift was detected, such as a dropped column or type change |
 | `chops dq anomalies <table>` | `0` | No anomalies were detected, or there was not enough history to evaluate |
